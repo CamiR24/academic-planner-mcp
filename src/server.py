@@ -7,6 +7,7 @@ from mcp.types import Tool, TextContent
 from .models import Task
 from .store import TaskStore
 from .priority import calculate_priority, calculate_priority_breakdown
+from .schedule import generate_study_schedule
 
 app = Server("academic-planner")
 store = TaskStore()
@@ -49,7 +50,7 @@ async def list_tools() -> list[Tool]:
                 },
             },
         ),
-                Tool(
+        Tool(
             name="update_task_status",
             description="Actualiza el estado de una tarea existente (pendiente, en_progreso, completada).",
             inputSchema={
@@ -86,6 +87,25 @@ async def list_tools() -> list[Tool]:
                     "available_hours_per_day": {"type": "number"},
                 },
                 "required": ["days_ahead", "available_hours_per_day"],
+            },
+        ),
+        Tool(
+            name="generate_study_schedule",
+            description=(
+                "Genera un plan de estudio día por día, distribuyendo las horas "
+                "disponibles del estudiante entre sus tareas pendientes según prioridad "
+                "(urgencia, dificultad, importancia)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "available_hours_per_day": {"type": "number"},
+                    "days_ahead": {
+                        "type": "integer",
+                        "description": "Número de días hacia adelante a planificar",
+                    },
+                },
+                "required": ["available_hours_per_day", "days_ahead"],
             },
         ),
     ]
@@ -162,6 +182,28 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         ]
         if overloaded:
             lines.append(f"Déficit: {round(total_needed - total_available, 1)} horas")
+
+        return [TextContent(type="text", text="\n".join(lines))]
+
+    if name == "generate_study_schedule":
+        tasks = store.get_pending()
+        result = generate_study_schedule(
+            tasks,
+            arguments["available_hours_per_day"],
+            arguments["days_ahead"],
+        )
+
+        lines = []
+        for day in result["schedule"]:
+            if day["allocations"]:
+                detail = ", ".join(f"{a['task']} ({a['hours']}h)" for a in day["allocations"])
+                lines.append(f"{day['date']}: {detail} [total {day['hours_used']}h]")
+            else:
+                lines.append(f"{day['date']}: sin tareas asignadas")
+
+        if result["warnings"]:
+            lines.append("\n⚠️ Advertencias:")
+            lines.extend(result["warnings"])
 
         return [TextContent(type="text", text="\n".join(lines))]
 
