@@ -8,6 +8,8 @@ from .models import Task
 from .store import TaskStore
 from .priority import calculate_priority, calculate_priority_breakdown
 from .schedule import generate_study_schedule
+from .study_techniques import recommend_study_technique
+from .project_decomposition import decompose_project
 
 app = Server("academic-planner")
 store = TaskStore()
@@ -108,6 +110,41 @@ async def list_tools() -> list[Tool]:
                 "required": ["available_hours_per_day", "days_ahead"],
             },
         ),
+        Tool(
+            name="recommend_study_technique",
+            description=(
+                "Recomienda una técnica de estudio (repetición espaciada, técnica Feynman, "
+                "práctica deliberada) según el tipo de contenido a aprender."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "content_type": {
+                        "type": "string",
+                        "enum": ["memorización", "conceptual", "práctico"],
+                    },
+                    "time_available_hours": {"type": "number"},
+                },
+                "required": ["content_type", "time_available_hours"],
+            },
+        ),
+        Tool(
+            name="decompose_project",
+            description=(
+                "Divide un proyecto académico grande en fases más pequeñas "
+                "(investigación, desarrollo, pruebas, entrega) con fechas sugeridas "
+                "distribuidas hasta la fecha límite final."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "description": {"type": "string"},
+                    "deadline": {"type": "string", "description": "Formato YYYY-MM-DD"},
+                    "estimated_total_hours": {"type": "number"},
+                },
+                "required": ["description", "deadline", "estimated_total_hours"],
+            },
+        ),
     ]
 
 
@@ -205,6 +242,26 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             lines.append("\n⚠️ Advertencias:")
             lines.extend(result["warnings"])
 
+        return [TextContent(type="text", text="\n".join(lines))]
+
+    if name == "recommend_study_technique":
+        result = recommend_study_technique(
+            arguments["content_type"], arguments["time_available_hours"]
+        )
+        lines = [f"{k}: {v}" for k, v in result.items()]
+        return [TextContent(type="text", text="\n".join(lines))]
+
+    if name == "decompose_project":
+        result = decompose_project(
+            arguments["description"],
+            date.fromisoformat(arguments["deadline"]),
+            arguments["estimated_total_hours"],
+        )
+        lines = [f"Proyecto: {result['project']} (deadline final: {result['final_deadline']})"]
+        for st in result["subtasks"]:
+            lines.append(
+                f"  - {st['name']}: {st['estimated_hours']}h, sugerido antes de {st['suggested_deadline']}"
+            )
         return [TextContent(type="text", text="\n".join(lines))]
 
     raise ValueError(f"Tool desconocida: {name}")
